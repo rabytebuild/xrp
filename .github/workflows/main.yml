@@ -1,0 +1,97 @@
+name: Build RDP Server
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  rdp-server:
+    runs-on: windows-latest
+
+    strategy:
+      matrix:
+        node-version: [12.18.0]
+        npm-version: [6.14.1]
+        react-version: [16.13.1]
+        electrode-version: [4.0.0]
+        redis-version: [6.2.2]
+        mysql-version: [5.7.26]
+        mssql-version: [15.0.3150.1]
+
+    env:
+      WINDOWS_VERSION: '10.0.19041.653 (winbuild.19041.653)'
+      NODE_VERSION: ${{ matrix.node-version }}
+      NPM_VERSION: ${{ matrix.npm-version }}
+      REACT_VERSION: ${{ matrix.react-version }}
+      ELECTRODE_VERSION: ${{ matrix.electrode-version }}
+      REDIS_VERSION: ${{ matrix.redis-version }}
+      MYSQL_VERSION: ${{ matrix.mysql-version }}
+      MSSQL_VERSION: ${{ matrix.mssql-version }}
+      APP_NAME: 'xrptex'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install Node.js and npm
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          npm-version: ${{ env.NPM_VERSION }}
+
+      - name: Install React
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.REACT_VERSION }}
+
+      - name: Install Redis
+        uses: actions/setup-redis@v2
+        with:
+          version: ${{ env.REDIS_VERSION }}
+
+      - name: Install MySQL
+        uses: actions/setup-mysql@v2
+        with:
+          version: ${{ env.MYSQL_VERSION }}
+
+      - name: Install MSSQL
+        uses: actions/setup-mssql@v2
+        with:
+          version: ${{ env.MSSQL_VERSION }}
+
+      - name: Install Electrode
+        uses: actions/setup-electrode@v1
+        with:
+          version: ${{ env.ELECTRODE_VERSION }}
+
+      - name: Install ngrok
+        run: |
+          Invoke-WebRequest -Uri https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
+          Expand-Archive ngrok.zip -DestinationPath $env:USERPROFILE
+          Remove-Item ngrok.zip
+
+      - name: Auth
+        run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
+
+      - name: Enable TS
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "Rabiu2004@" -Force)
+
+      - name: Create Tunnel
+        run: .\ngrok\ngrok.exe tcp 3389
+
+      - name: Build the application
+        run: pnpm run build
+
+      - name: Run tests
+        run: jest --config .jest.json
+
+      - name: Upload artifacts to S3
+        uses: actions/upload-artifact@v2
+        with:
+          name: application
+          path: /tmp/application
